@@ -357,6 +357,11 @@ def cmd_run(args) -> None:
     except fetch.Challenged:
         notify.send("🤖 X digest: X wants a human check. Run `uv run xdigest.py login` and clear it.")
         sys.exit(3)
+    except fetch.Blocked as e:
+        notify.send(f"🔑 X digest: {e}. That usually means the X login expired: run "
+                    "`uv run xdigest.py login` in the xdigest folder. If you're logged in and it "
+                    "keeps happening, X may be refusing automated browsers.")
+        sys.exit(5)
     except Exception as e:
         notify.send(f"💥 X digest failed: {type(e).__name__}: {str(e)[:200]}")
         raise

@@ -17,7 +17,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-from playwright.sync_api import BrowserContext, Page, sync_playwright
+from playwright.sync_api import BrowserContext, Error as PlaywrightError, Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 import store
 import xdata
@@ -50,6 +51,16 @@ class Challenged(Exception):
     pass
 
 
+class Blocked(Exception):
+    """X answered the home page with an HTTP error. In headless Chrome X does this
+    (403) when the login has expired, so the usual fix is `login`."""
+
+
+HOME = "https://x.com/home"
+LOGIN_PATHS = ("/login", "/i/flow/", "/i/jf/onboarding")
+HOME_SCREENSHOT = store.DATA_DIR / "last-home.png"
+
+
 def _open(p, headless: bool) -> BrowserContext:
     store.PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     return p.chromium.launch_persistent_context(
@@ -67,8 +78,36 @@ def _check_state(page: Page) -> None:
     url = page.url
     if "/account/access" in url or page.locator('iframe[src*="arkose"], iframe[src*="captcha"]').count():
         raise Challenged(url)
-    if "/login" in url or "/i/flow/" in url or page.locator(LOGGED_OUT_SELECTOR).count():
+    if any(p in url for p in LOGIN_PATHS) or page.locator(LOGGED_OUT_SELECTOR).count():
         raise LoggedOut(url)
+
+
+def open_home(page: Page) -> None:
+    """Load the home timeline and positively confirm we're logged in. Raises Blocked
+    (HTTP error), LoggedOut, Challenged, or RuntimeError (page not recognized); network
+    failures propagate as Playwright errors."""
+    statuses = []
+    on_response = lambda r: r.url.split("?")[0].rstrip("/") == HOME and statuses.append(r.status)
+    page.on("response", on_response)
+    try:
+        try:
+            page.goto(HOME, wait_until="domcontentloaded")
+        except PlaywrightError:
+            if statuses and statuses[-1] >= 400:  # e.g. an empty 403, which Chrome treats as a download
+                raise Blocked(f"x.com/home returned HTTP {statuses[-1]}") from None
+            raise
+        if statuses and statuses[-1] >= 400:
+            raise Blocked(f"x.com/home returned HTTP {statuses[-1]}")
+        try:
+            page.wait_for_selector(f"{LOGGED_IN_SELECTOR}, {LOGGED_OUT_SELECTOR}", timeout=30_000)
+        except PlaywrightTimeout:
+            pass
+        _check_state(page)
+        if not page.locator(LOGGED_IN_SELECTOR).count():
+            page.screenshot(path=str(HOME_SCREENSHOT))
+            raise RuntimeError(f"couldn't confirm login at {page.url} (screenshot: {HOME_SCREENSHOT})")
+    finally:
+        page.remove_listener("response", on_response)
 
 
 def login() -> None:
@@ -80,19 +119,25 @@ def login() -> None:
     subprocess.run(["open", "-n", "-W", "-a", "Google Chrome", "--args",
                     f"--user-data-dir={store.PROFILE_DIR}", "--no-first-run", "https://x.com/login"],
                    check=True)
-    print("logged in" if is_logged_in() else "NOT logged in: try again later")
+    print(login_status())
 
 
-def is_logged_in() -> bool:
+def login_status() -> str:
+    """'logged in', or what went wrong, from a headless load of the home page."""
     with sync_playwright() as p:
         ctx = _open(p, headless=True)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         try:
-            page.goto("https://x.com/home", wait_until="domcontentloaded")
-            page.wait_for_selector(f'{LOGGED_IN_SELECTOR}, {LOGGED_OUT_SELECTOR}', timeout=30_000)
-            return page.locator(LOGGED_IN_SELECTOR).count() > 0
-        except Exception:
-            return False
+            open_home(page)
+            return "logged in"
+        except LoggedOut:
+            return "NOT logged in: try again later"
+        except Challenged:
+            return "NOT logged in: X wants a human check; run login again and clear it"
+        except Blocked as e:
+            return f"NOT logged in: {e}"
+        except Exception as e:
+            return f"couldn't tell: {type(e).__name__}: {str(e).splitlines()[0]}"
         finally:
             ctx.close()
 
@@ -216,12 +261,7 @@ def fetch(max_posts: int = 60, max_following: int = 100, min_for_you: int = 15,
                 _keep_json(r, timeline_data)
         page.on("response", on_response)
         try:
-            page.goto("https://x.com/home", wait_until="domcontentloaded")
-            try:
-                page.wait_for_selector(f'{LOGGED_IN_SELECTOR}, {LOGGED_OUT_SELECTOR}', timeout=30_000)
-            except Exception:
-                pass
-            _check_state(page)
+            open_home(page)
 
             counted: set[str] = set()
             if max_following > 0:
