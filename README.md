@@ -10,7 +10,7 @@ whatever you like), and each pick arrives as its own message:
 - **Telegram:** full posts with images, quoted posts, and playable video.
 - **Signal:** rendered post cards (animated GIFs when there's video).
 
-**Setting up with Claude Code:** clone the repo, run `cd ahh-toys/xdigest && claude`,
+**Setting up with Claude Code:** clone the repo, run `cd xdigest && claude`,
 and say "set this up". Claude follows [CLAUDE.md](CLAUDE.md), does the setup work, and
 asks you for the few things only you can do (GitHub login, an API key or bot token,
 signing in to X). `uv run xdigest.py check` shows what's done at any point.
@@ -75,7 +75,7 @@ Run `uv run xdigest.py check` at any point to see which of these steps are done.
 ### 1. Code and data repo
 
 ```
-git clone https://github.com/ahh/ahh-toys && cd ahh-toys/xdigest && uv sync
+git clone https://github.com/ahh/xdigest && cd xdigest && uv sync
 gh repo create xdigest-data --private --add-readme
 ```
 
