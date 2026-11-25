@@ -32,13 +32,24 @@ BATCHES = ROOT / "batches"
 OUT = ROOT / "out"
 
 
+def lines(path: Path) -> list[str]:
+    """Split on newlines only. str.splitlines() also splits on U+2028 and friends,
+    which can appear raw inside a JSON string and would cut a record in two."""
+    return [line for line in path.read_text().split("\n") if line.strip()]
+
+
 def read_jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return [json.loads(line) for line in lines(path)]
+
+
+def _line(row: dict) -> str:
+    return (json.dumps(row, ensure_ascii=False).replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029") + "\n")
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    path.write_text("".join(_line(r) for r in rows))
 
 
 def _about(a: dict) -> str:
@@ -152,9 +163,7 @@ def finish() -> None:
     scores: dict[str, dict] = {}
     bad = 0
     for path in sorted(BATCHES.glob("batch-*.scores.jsonl")):
-        for line in path.read_text().splitlines():
-            if not line.strip():
-                continue
+        for line in lines(path):
             try:
                 s = json.loads(line)
             except json.JSONDecodeError:

@@ -65,18 +65,26 @@ def save_seen(seen: dict[str, str]) -> None:
     os.replace(tmp, SEEN_FILE)
 
 
+def _line(row: dict) -> str:
+    """One JSONL line. Unicode line/paragraph separators (U+2028/U+2029) are escaped:
+    they're legal raw inside JSON strings, but readers that split lines with
+    str.splitlines() (or editors) break the record there."""
+    return (json.dumps(row, ensure_ascii=False).replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029") + "\n")
+
+
 def write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            f.write(_line(row))
 
 
 def append_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a") as f:
         for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            f.write(_line(row))
 
 
 def read_jsonl(path: Path) -> list[dict]:
